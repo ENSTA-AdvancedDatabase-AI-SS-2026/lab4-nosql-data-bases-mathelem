@@ -33,31 +33,67 @@ UNWIND [
 MERGE (:Cours {code: cours.code, intitule: cours.intitule, 
                credits: cours.credits, departement: cours.dept});
 
-// ─── 1.4 : Créer les étudiants ────────────────────────────────────────────────
-// TODO: Créer 50 étudiants avec données algériennes réalistes
-// Utiliser UNWIND avec une liste de maps
-// Universités : USTHB, UMBB, USTO, UMC, UBMA
-// Filieres : Informatique, Mathématiques, Electronique, Telecoms, GL
+// ─── 1.4 : Importer et Créer les étudiants depuis CSV ────────────────────────
+// Utiliser LOAD CSV avec le fichier import/students.csv
+LOAD CSV WITH HEADERS FROM 'file:///students.csv' AS row
+MERGE (e:Etudiant {id: row.id})
+SET e.prenom = row.prenom,
+    e.nom = row.nom,
+    e.universite = row.universite,
+    e.filiere = row.filiere,
+    e.annee = toInteger(row.annee),
+    e.ville = row.ville;
 
-UNWIND [
-  // TODO: Ajouter 50 étudiants
-  {id: "E001", prenom: "Ahmed", nom: "Bensalem", universite: "USTHB", 
-   filiere: "Informatique", annee: 3, ville: "Alger"},
-  {id: "E002", prenom: "Fatima", nom: "Ouali", universite: "USTHB",
-   filiere: "Informatique", annee: 3, ville: "Alger"}
-  // TODO: Continuer...
-] AS data
-MERGE (e:Etudiant {id: data.id})
-SET e += data;
+// ─── 1.5 : Créer des étudiants mock supplémentaires (Pour atteindre 50+) ─────
+UNWIND range(11, 50) AS i
+MERGE (e:Etudiant {id: "E0" + i})
+SET e.prenom = "Prenom" + i,
+    e.nom = "Nom" + i,
+    e.universite = ["USTHB", "UMBB", "USTO", "UMC", "UBMA"][i % 5],
+    e.filiere = ["Informatique", "Mathématiques", "Electronique", "Telecoms", "GL"][i % 5],
+    e.annee = (i % 5) + 1,
+    e.ville = ["Alger", "Boumerdes", "Oran", "Constantine", "Annaba"][i % 5];
 
-// ─── 1.5 : Créer les relations ────────────────────────────────────────────────
-// TODO: Relations CONNAIT entre étudiants
-// Assurer que le graphe est connexe (pas d'étudiants isolés)
+// ─── 1.6 : Créer Clubs et Entreprises ──────────────────────────────────────
+MERGE (:Club {nom: "Club IA USTHB", universite: "USTHB", domaine: "IA"})
+MERGE (:Club {nom: "CyberSec UMBB", universite: "UMBB", domaine: "Sécurité"})
+MERGE (:Entreprise {nom: "Sonatrach", secteur: "Energie", ville: "Alger"})
+MERGE (:Entreprise {nom: "Yassir", secteur: "Tech", ville: "Alger"});
 
-// TODO: Relations SUIT (étudiant → cours) avec notes
+// ─── 1.7 : Créer les relations ────────────────────────────────────────────────
+// Utiliser le cartesian product aléatoire pour lier CONNAIT
+MATCH (e1:Etudiant), (e2:Etudiant)
+WHERE e1.id < e2.id AND rand() < 0.05
+MERGE (e1)-[:CONNAIT {depuis: 2023}]->(e2)
+MERGE (e2)-[:CONNAIT {depuis: 2023}]->(e1);
 
-// TODO: Relations MAITRISE (étudiant → compétence) avec niveaux
+// Lier Étudiants -> Cours
+MATCH (e:Etudiant), (c:Cours)
+WHERE rand() < 0.2
+MERGE (e)-[:SUIT {semestre: 1, note: toInteger(rand() * 10) + 10}]->(c);
 
-// Vérification
+// Lier Étudiants -> Compétence
+MATCH (e:Etudiant), (comp:Competence)
+WHERE rand() < 0.15
+MERGE (e)-[:MAITRISE {niveau: "Intermédiaire"}]->(comp);
+
+// Lier Cours -> Compétences requises
+MATCH (c:Cours {code: "INFO402"}), (comp:Competence {nom: "Python"})
+MERGE (c)-[:REQUIERT]->(comp);
+MATCH (c:Cours {code: "INFO402"}), (comp:Competence {nom: "Machine Learning"})
+MERGE (c)-[:REQUIERT]->(comp);
+
+// Lier Étudiants -> Club
+MATCH (e:Etudiant {universite: "USTHB"}), (club:Club {universite: "USTHB"})
+WHERE rand() < 0.3
+MERGE (e)-[:MEMBRE_DE {role: "Membre"}]->(club);
+
+// Lier Étudiant -> Entreprise
+MATCH (e:Etudiant)
+WHERE e.id = "E002" OR e.id = "E020"
+MATCH (ent:Entreprise {nom: "Sonatrach"})
+MERGE (e)-[:A_STAGE_CHEZ {annee: 2024, duree_mois: 3}]->(ent);
+
+// ─── 1.8 : Vérification ───────────────────────────────────────────────────────
 MATCH (n) RETURN labels(n)[0] AS type, count(n) AS total ORDER BY total DESC;
 MATCH ()-[r]->() RETURN type(r) AS relation, count(r) AS total ORDER BY total DESC;
