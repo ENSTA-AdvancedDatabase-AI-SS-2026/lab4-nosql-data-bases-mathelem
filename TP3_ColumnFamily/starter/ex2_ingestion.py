@@ -57,7 +57,18 @@ def insert_single(session, mesure):
     TODO: Insérer une seule mesure dans mesures_par_capteur
     Utiliser une prepared statement
     """
-    pass
+    query = """
+        INSERT INTO mesures_par_capteur 
+        (capteur_id, date_jour, timestamp, wilaya, commune, tension_v, courant_a, puissance_kw, frequence_hz, temperature, alerte) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+    prepared = session.prepare(query)
+    session.execute(prepared, (
+        mesure['capteur_id'], mesure['date_jour'], mesure['timestamp'],
+        mesure['wilaya'], mesure['commune'], mesure['tension_v'],
+        mesure['courant_a'], mesure['puissance_kw'], mesure['frequence_hz'],
+        mesure['temperature'], mesure['alerte']
+    ))
 
 
 def insert_batch(session, mesures: list):
@@ -66,7 +77,25 @@ def insert_batch(session, mesures: list):
     Utiliser UNLOGGED BATCH pour les séries temporelles
     Faire des batches de max 50 items (bonne pratique Cassandra)
     """
-    pass
+    query = """
+        INSERT INTO mesures_par_capteur 
+        (capteur_id, date_jour, timestamp, wilaya, commune, tension_v, courant_a, puissance_kw, frequence_hz, temperature, alerte) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+    prepared = session.prepare(query)
+    
+    # Process in chunks of 50
+    for i in range(0, len(mesures), 50):
+        chunk = mesures[i:i+50]
+        batch = BatchStatement(batch_type=BatchType.UNLOGGED)
+        for mesure in chunk:
+            batch.add(prepared, (
+                mesure['capteur_id'], mesure['date_jour'], mesure['timestamp'],
+                mesure['wilaya'], mesure['commune'], mesure['tension_v'],
+                mesure['courant_a'], mesure['puissance_kw'], mesure['frequence_hz'],
+                mesure['temperature'], mesure['alerte']
+            ))
+        session.execute(batch)
 
 
 def run_ingestion(session):
@@ -83,7 +112,27 @@ def run_ingestion(session):
     print(f"Démarrage ingestion : {NB_CAPTEURS} capteurs × {MINUTES_HISTORIQUE} min")
     start = time.time()
     
-    # TODO: Implémenter
+    # 1. Générer le référentiel des capteurs
+    capteurs = []
+    for _ in range(NB_CAPTEURS):
+        w = random.choice(WILAYAS)
+        c = random.choice(COMMUNES[w])
+        capteurs.append({'id': uuid.uuid4(), 'wilaya': w, 'commune': c})
+        
+    # 2. Insérer minute par minute
+    base_time = datetime.now() - timedelta(minutes=MINUTES_HISTORIQUE)
+    for m in range(MINUTES_HISTORIQUE):
+        current_time = base_time + timedelta(minutes=m)
+        print(f"Ingestion minute {m+1}/{MINUTES_HISTORIQUE}...")
+        
+        # We group by partition key for batches (capteur_id, date_jour)
+        # For simplicity and speed in this local script, we'll just insert_batch them all (they will be grouped in chunks of 50 inside)
+        mesures = []
+        for cap in capteurs:
+            mesure = generate_mesure(cap['id'], cap['wilaya'], cap['commune'], current_time)
+            mesures.append(mesure)
+            
+        insert_batch(session, mesures)
     
     elapsed = time.time() - start
     total = NB_CAPTEURS * MINUTES_HISTORIQUE
