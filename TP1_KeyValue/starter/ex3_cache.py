@@ -32,18 +32,26 @@ def get_product_cached(r, product_id: int, ttl: int = 600) -> Optional[dict]:
     """
     start = time.time()
     
-    # TODO: Implémenter le pattern Cache-Aside
-    # Utiliser json.dumps/json.loads pour sérialiser
+    key = f"product_cache:{product_id}"
+    cached = r.get(key)
     
-    elapsed = time.time() - start
-    # TODO: Afficher "CACHE HIT (Xms)" ou "CACHE MISS (Xms)"
-    pass
+    if cached:
+        product = json.loads(cached)
+        status = "CACHE HIT"
+    else:
+        product = slow_db_get_product(product_id)
+        if product:
+            r.setex(key, ttl, json.dumps(product))
+        status = "CACHE MISS"
+        
+    elapsed = (time.time() - start) * 1000
+    print(f"{status} ({elapsed:.2f}ms)")
+    return product
 
 
 def invalidate_product_cache(r, product_id: int):
     """Supprimer le cache d'un produit (après mise à jour en DB)"""
-    # TODO
-    pass
+    r.delete(f"product_cache:{product_id}")
 
 
 def benchmark_cache(r, product_id: int, iterations: int = 20):
@@ -54,8 +62,35 @@ def benchmark_cache(r, product_id: int, iterations: int = 20):
     - Temps moyen cache MISS
     - Taux de cache hit (%)
     """
-    # TODO
-    pass
+    r.flushdb() # Clean up cache before bench
+    hit_times = []
+    miss_times = []
+    
+    for _ in range(iterations):
+        start = time.time()
+        key = f"product_cache:{product_id}"
+        cached = r.get(key)
+        
+        if cached:
+            # hit
+            product = json.loads(cached)
+            elapsed = (time.time() - start) * 1000
+            hit_times.append(elapsed)
+        else:
+            # miss
+            product = slow_db_get_product(product_id)
+            if product:
+                r.setex(key, 600, json.dumps(product))
+            elapsed = (time.time() - start) * 1000
+            miss_times.append(elapsed)
+            
+    avg_hit = sum(hit_times) / len(hit_times) if hit_times else 0.0
+    avg_miss = sum(miss_times) / len(miss_times) if miss_times else 0.0
+    hit_rate = len(hit_times) / iterations * 100
+    
+    print(f"Temps moyen cache HIT: {avg_hit:.2f}ms")
+    print(f"Temps moyen cache MISS: {avg_miss:.2f}ms")
+    print(f"Taux de cache hit: {hit_rate:.2f}%")
 
 
 if __name__ == "__main__":
